@@ -1,0 +1,523 @@
+import numpy as np
+import random
+import matplotlib.pyplot as plt
+import sys
+
+
+# return true in probability
+def decision(probability):
+    return random.random() < probability
+
+
+# saves all data of constraints
+class Constraints:
+
+    def __init__(self, size, num_of_digits, digits_coordinates, num_of_greather, greather_than):
+        self.size = size
+        self.numOfDigits = num_of_digits
+        self.digitsCoordinates = digits_coordinates
+        self.numOfGreaterThan = num_of_greather
+        self.greaterThanCoordinates = greather_than
+
+
+# parser the text file for constraints
+def parser_file_constraints(path):
+    # open the file to read
+    arg = open(path, "r")
+    all_arg = arg.read()
+    numOfDigits = 0
+    num_of_greater_than = 0
+    size = 0
+    num = 0
+    i = j = 0
+    digitsCoordinatesX = []
+    digitsCoordinatesY = []
+    digitsCoordinatesVal = []
+    greaterThanCoordinates_x_b = []
+    greaterThanCoordinates_y_b = []
+    greaterThanCoordinates_x_s = []
+    greaterThanCoordinates_y_s = []
+
+    digits_coordinate = []
+    new_digits_coordinate = {}
+    greater_than_coordinates = []
+    new_greater_than_coordinates = {}
+    # go throw all the file
+    for x in all_arg:
+        if x == '\n':
+            num += 1
+        elif num == 0:
+            size = int(x)
+        elif num == 1:
+            numOfDigits = int(x)
+        elif 1 < num <= (1 + int(numOfDigits)):
+            if x != ' ':
+
+                if i % 3 == 0:
+                    new_digits_coordinate = {}
+                    new_digits_coordinate["x"] = int(x)
+                elif i % 3 == 1:
+                    new_digits_coordinate["y"] = int(x)
+
+                else:
+                    new_digits_coordinate["val"] = int(x)
+                    digits_coordinate.append(new_digits_coordinate)
+
+                i += 1
+        elif num == (2 + int(numOfDigits)):
+            num_of_greater_than = int(x)
+        elif num > (2 + int(numOfDigits)):
+            if x != ' ':
+                if j % 4 == 0:
+                    new_greater_than_coordinates = {}
+                    new_greater_than_coordinates["x_b"] = int(x)
+                elif j % 4 == 1:
+                    new_greater_than_coordinates["y_b"] = int(x)
+                elif j % 4 == 2:
+                    new_greater_than_coordinates["x_s"] = int(x)
+                else:
+                    new_greater_than_coordinates["y_s"] = int(x)
+                    greater_than_coordinates.append(new_greater_than_coordinates)
+                j += 1
+    num_of_greater_than = len(greater_than_coordinates)
+    constraints = Constraints(size, numOfDigits, digits_coordinate, num_of_greater_than, greater_than_coordinates)
+
+    return constraints
+
+
+# swap between two numbers in line
+def swap_in_line(arr, j_1, j_2):
+    arr[j_1], arr[j_2] = arr[j_2], arr[j_1]
+
+
+# Grid type object class. includes all methods operated on a single grid
+class Grid:
+    def __init__(self, constraints, grid_arr=np.array([])):
+        self.grid_arr = grid_arr
+        self.constraints = constraints
+        self.id = 0
+        self.score = 0
+
+    # initializes a grid randomly so that each row is a permutation of numbers from 1 to N
+    def init_random(self):
+        size = self.constraints.size
+        new_grid_arr = np.empty((0, size), dtype=int)
+
+        for i in range(size):
+            arr = np.random.permutation(size) + 1
+            new_grid_arr = np.vstack([new_grid_arr, arr])
+
+        self.grid_arr = new_grid_arr
+        self.fix_constraints()
+
+    # checks that the constraints of the fixed digits are met, otherwise fix
+    def fix_constraints(self):
+        for digitsCoordinate in self.constraints.digitsCoordinates:
+            i = digitsCoordinate["x"] - 1
+            j = digitsCoordinate["y"] - 1
+            val = digitsCoordinate["val"]
+            if self.grid_arr[i][j] != val:
+                index = np.where(self.grid_arr[i] == val)
+                swap_in_line(self.grid_arr[i], j, index)
+
+    # responsible for mutating the grid. Selects a line and switches between two numbers
+    def mutation(self):
+        size = self.constraints.size
+        line = random.randint(0, size - 1)
+        j_1 = random.randint(0, size - 1)
+        j_2 = random.randint(0, size - 1)
+        swap_in_line(self.grid_arr[line], j_1, j_2)
+
+    # calculates the score of the grid.
+    # checks how many unique numbers there are in each column and how many constraints are met.
+    def fitness(self, colum_score, greater_then_score):
+        score = 0
+        # checks how many unique numbers there are in each column
+        for colum in np.transpose(self.grid_arr):
+            unique, counts = np.unique(colum, return_counts=True)
+            score += len(unique) * colum_score
+        # checks how many constraints are met
+        for greaterThanCoordinate in self.constraints.greaterThanCoordinates:
+            x_b = greaterThanCoordinate["x_b"] - 1
+            y_b = greaterThanCoordinate["y_b"] - 1
+            x_s = greaterThanCoordinate["x_s"] - 1
+            y_s = greaterThanCoordinate["y_s"] - 1
+            if self.grid_arr[x_b][y_b] > self.grid_arr[x_s][y_s]:
+                score += greater_then_score
+        self.score = score
+        return score
+
+    # makes a crossover between two grids.
+    # from the first grid to the cross_line, and from the second grid from the cross_line to the end
+    def cross_over_with_another(self, another, cross_line):
+        new_grid = self.create_copy()
+        new_grid.grid_arr = np.concatenate((self.grid_arr[:cross_line], another.grid_arr[cross_line:]))
+        return new_grid
+
+    # create deep copy of the grid
+    def create_copy(self):
+        new_grid = Grid(self.constraints, self.grid_arr.copy())
+        new_grid.score = self.score
+        new_grid.id = self.id
+        return new_grid
+
+    # Optimizes the board
+    def grid_optimization(self):
+        greater_than_coordinates = self.constraints.greaterThanCoordinates
+        np.random.shuffle(greater_than_coordinates)
+        grid_copy = self.create_copy()
+
+        i = 0
+        # finds a line that has a constraint that does not exist and fix it
+        # limited to constraints.size
+        for greaterThanCoordinate in greater_than_coordinates:
+            x_b = greaterThanCoordinate["x_b"] - 1
+            y_b = greaterThanCoordinate["y_b"] - 1
+            x_s = greaterThanCoordinate["x_s"] - 1
+            y_s = greaterThanCoordinate["y_s"] - 1
+            if i <= self.constraints.size and x_b == x_s and grid_copy.grid_arr[x_b][y_b] < grid_copy.grid_arr[x_s][
+                y_s]:
+                swap_in_line(grid_copy.grid_arr[x_s], y_s, y_b)
+                i += 1
+
+        grid_copy.fix_constraints()
+        return grid_copy
+
+
+# creates an array in which each board appears according to its score
+def create_chance_array(generation_scores):
+    chance_array = []
+    for i, grid_score in enumerate(generation_scores):
+        grid_score = abs(grid_score)
+        for j in range(grid_score):
+            chance_array.append(i)
+    return chance_array
+
+
+# GeneticModel type object class. includes all methods operated on the model
+class GeneticModel:
+    def __init__(self, constraints, num, colum_score, greater_then_score, do_optimize, is_lamarck):
+        self.constraints = constraints
+        self.num = num
+        self.colum_score = colum_score
+        self.greater_then_score = greater_then_score
+        self.max_score = 0
+        self.set_max_score(colum_score, greater_then_score)
+        # array of all networks
+        self.population = []
+
+        self.do_optimize = do_optimize
+        self.is_lamarck = is_lamarck
+        # initializes to all grids
+        for i in range(num):
+            new_grid = Grid(constraints)
+            new_grid.id = random.randint(0, 999999999)
+            new_grid.init_random()
+            self.population.append(new_grid)
+
+    # calculate the max_score
+    def set_max_score(self, colum_score, greater_then_score):
+        self.colum_score = colum_score
+        self.greater_then_score = greater_then_score
+
+        max_score = self.colum_score * (self.constraints.size ** 2)
+        max_score += self.greater_then_score * self.constraints.numOfGreaterThan
+        self.max_score = max_score
+
+    # runs optimization on all grids in the model
+    def grid_optimization_model(self):
+        new_generation_optimization = []
+        for grid in self.population:
+            opt_grid = grid.grid_optimization()
+            new_generation_optimization.append(opt_grid)
+        return new_generation_optimization
+
+    # look for the X grids with the highest score in the model
+    def get_x_max(self, arr, x):
+        max_arr = np.argpartition(arr, -self.num)[-self.num:]
+        max_arr = max_arr[np.argsort(arr[max_arr])]
+        max_arr = max_arr[::-1]
+        max_x_arr = np.array([max_arr[0]])
+        is_have_same = True
+        is_break = True
+        for i in range(x):
+
+            for index_of_max in max_arr:
+                is_have_same = False
+                is_break = False
+                for index_of_max_x in max_x_arr:
+                    if len(max_x_arr) >= x:
+                        return max_x_arr
+
+                    if (self.population[index_of_max].grid_arr == self.population[index_of_max_x].grid_arr).all():
+                        is_have_same = True
+                        is_break = True
+                        break
+                if is_have_same:
+                    max_arr = max_arr[max_arr != index_of_max]
+                elif not is_break:
+                    max_x_arr = np.append(max_x_arr, index_of_max)
+
+        return max_x_arr
+
+    # def is_solution(self, grid):
+    #     score = grid.fitness(self.colum_score, self.greater_then_score)
+    #     if score == self.max_score:
+    #         return True
+    #     else:
+    #         return False
+    # calculates the score of all the grids in the model.
+
+    # if he finds a grid that is the solution, returns it.
+    def fitness_model(self, population):
+        generation_scores = []
+        sum_score = 0
+        is_solution = False
+        solution_grid = []
+        for i, grid in enumerate(population):
+            score = grid.fitness(self.colum_score, self.greater_then_score)
+            generation_scores.append(score)
+            sum_score += score
+
+            if score == self.max_score:
+                is_solution = True
+                solution_grid = grid.create_copy()
+
+        return generation_scores, sum_score, is_solution, solution_grid
+
+    # operation crossover between two random grids from the model.
+    # randomly selects a line
+    def cross_over_model(self, chance_array, index_1, sum_score):
+        rand = random.randint(0, sum_score - 1)
+        line = random.randint(0, self.constraints.size - 1)
+        new_grid = self.population[chance_array[index_1]].cross_over_with_another(self.population[chance_array[rand]],
+                                                                                  line)
+        return new_grid
+
+    # operation selection on the model.
+    # according to the score, a new generation is randomly selected.
+    # operation Elitism: selects the 5 best for the next generation.
+    # at a probability of 0.7 does crossover, otherwise puts the grid into the new generation
+    def selection_model(self):
+        new_generation = []
+        current_generation = self.population
+        new_generation_optimization = []
+        # depending on the input performs optimization
+        if self.do_optimize:
+            new_generation_optimization = self.grid_optimization_model()
+            generation_scores, sum_score, is_solution, solution_grid = self.fitness_model(new_generation_optimization)
+        else:
+            generation_scores, sum_score, is_solution, solution_grid = self.fitness_model(current_generation)
+
+        if self.do_optimize and self.is_lamarck:
+            current_generation = new_generation_optimization
+
+        avg = sum_score / len(current_generation)
+        # create the chance array
+        chance_array = create_chance_array(generation_scores)
+        rand_arr = []
+        id_arr = []
+        max_s = np.array(generation_scores).max()
+        # look for the 5 grids with the highest score in the model
+        max_x_arr = self.get_x_max(np.array(generation_scores), 5)
+        # operation Elitism
+        for g in max_x_arr:
+            new_generation.append(current_generation[g].create_copy())
+        # create the new generation
+        for i in range(self.num):
+            rand = random.randint(0, sum_score - 1)
+            rand_arr.append(rand)
+            id_arr.append(current_generation[chance_array[rand]].id)
+            if decision(0.3):
+                new_generation.append(current_generation[chance_array[rand]].create_copy())
+            else:
+                # operation crossover
+                new_generation.append(self.cross_over_model(chance_array, rand, sum_score))
+        self.population = new_generation
+
+        unique, counts = np.unique(id_arr, return_counts=True)
+        return len(unique), max_s, avg, is_solution, solution_grid
+
+    # mutates on all model grids
+    def mutation_model(self, start, grid_probability, line_probability):
+        for i, g in enumerate(self.population):
+            if i > start and decision(grid_probability):
+                for k in range(15):
+                    if decision(line_probability):
+                        g.mutation()
+                g.fix_constraints()
+
+
+# draw a grid with the constraints
+def print_grid(model, constraints):
+    greader = 0
+    row = col = 0
+    grid = []
+    for i in range((model.population[0].constraints.size) * 2 - 1):
+        for j in range((model.population[0].constraints.size) * 2 - 1):
+            if j % 2 == 0 and i % 2 == 0:
+                num = model.population[0].grid_arr[row][col]
+                grid.append(str(num))
+                col += 1
+            else:
+                for greater_then in range(constraints.numOfGreaterThan):
+                    if (constraints.greaterThanCoordinates[greater_then]["x_b"] == row + 1 and
+                            constraints.greaterThanCoordinates[greater_then]["y_b"] == col
+                            and constraints.greaterThanCoordinates[greater_then]["x_s"] == row + 1 and
+                            constraints.greaterThanCoordinates[greater_then]["y_s"] == col + 1):
+                        grid.append('>')
+                        greader = 1
+                    if (constraints.greaterThanCoordinates[greater_then]["x_s"] == row + 1 and
+                            constraints.greaterThanCoordinates[greater_then]["y_s"] == col
+                            and constraints.greaterThanCoordinates[greater_then]["x_b"] == row + 1 and
+                            constraints.greaterThanCoordinates[greater_then]["y_b"] == col + 1):
+                        grid.append('<')
+                        greader = 1
+                    if (i % 2 == 1 and j % 2 == 0 and constraints.greaterThanCoordinates[greater_then][
+                        "x_b"] == row + 1 and
+                            constraints.greaterThanCoordinates[greater_then]["y_b"] == int(j / 2) + 1
+                            and constraints.greaterThanCoordinates[greater_then]["x_s"] == row + 2 and
+                            constraints.greaterThanCoordinates[greater_then]["y_s"] == int(j / 2) + 1):
+                        grid.append('v')
+                        greader = 1
+                    if (i % 2 == 1 and j % 2 == 0 and constraints.greaterThanCoordinates[greater_then][
+                        "x_s"] == row + 1 and
+                            constraints.greaterThanCoordinates[greater_then]["y_s"] == int(j / 2) + 1
+                            and constraints.greaterThanCoordinates[greater_then]["x_b"] == row + 2 and
+                            constraints.greaterThanCoordinates[greater_then]["y_b"] == int(j / 2) + 1):
+                        grid.append('^')
+                        greader = 1
+                if greader == 0:
+                    grid.append(' ')
+            greader = 0
+        col = 0
+        print(grid)
+        grid = []
+        if i % 2 == 1:
+            row += 1
+
+
+# runs the model
+def run_model():
+    # receives input from the user:
+    file_name = input("Enter your txt file: ")
+    algorithm_name = input("Enter your algoritem:\n 0-regular algorithm\n 1-Darwin algorithm\n 2-Lamarck algorithm\n ")
+    itr = input("Enter number of iteration: ")
+
+    do_optimize = True
+    is_lamarck = True
+    try:
+        # accessed the constraints file
+        constraints = parser_file_constraints(file_name)
+    except:
+        print("error: incorrect file name")
+        return
+    # according to the input selects the algorithm that will run
+    if algorithm_name == '0':
+        print("regular algorithm")
+        do_optimize = False
+        is_lamarck = False
+    elif algorithm_name == '1':
+        print("Darwin algorithm")
+        do_optimize = True
+        is_lamarck = False
+    elif algorithm_name == '2':
+        print("Lamarck algorithm")
+        do_optimize = True
+        is_lamarck = True
+    else:
+        print("error: incorrect algorithm number")
+        return
+
+    iterations_number = itr
+    try:
+        iterations_number = int(iterations_number)
+    except:
+        print("error: incorrect number of iterations")
+        return
+    # initializes the model
+    # The population size is 200
+    model = GeneticModel(constraints, 200, 1, 3, do_optimize, is_lamarck)
+
+    max_arr = []
+    avg_arr = []
+    is_solution = False
+
+    current_max = 0
+    count_max = 0
+    # performs the iterations
+    for j in range(iterations_number):
+        model.mutation_model(5, 0.1, 0.2)
+        # performs the selection
+        one, max_s, avg, is_solution, solution_grid = model.selection_model()
+
+        max_arr.append(max_s)
+        avg_arr.append(avg)
+        # if he has reached a solution, return it
+        if is_solution:
+            print(solution_grid.grid_arr)
+            print_grid(model, constraints)
+            break
+        # counted how many iterations there was no improvement
+        if current_max >= max_s:
+            count_max += 1
+        else:
+            count_max = 0
+
+        current_max = max(current_max, max_s)
+        # every 150 iterations in which there was no improvement, performs mutations
+        if count_max == 150:
+            model.mutation_model(0, 0.7, 0.7)
+        if count_max == 300:
+            model.mutation_model(0, 0.7, 0.7)
+        if count_max == 450:
+            model.mutation_model(0, 0.7, 0.7)
+        # after 600 iterations in which there was no improvement, start from the beginning
+        if count_max > 600:
+            greater_then_score = random.randint(1, 5)
+            model = GeneticModel(constraints, 200, 1, greater_then_score, do_optimize, is_lamarck)
+
+            count_max = 0
+            current_max = 0
+
+        # draws the plot
+
+        if j % 20 == 0:
+            plt.cla()
+            plt.plot(np.array(max_arr))
+            plt.plot(np.array(avg_arr))
+            plt.plot(np.array([model.max_score]))
+            # plt.xlim(0, 2000)
+            # plt.ylim(0.8, 1.4)
+            title = "file_name " + file_name + " algorithm_name " + algorithm_name + " \n i " + str(
+                j) + " max_score " + str(model.max_score) + " current max " + str(current_max)
+            plt.title(title)
+            plt.pause(0.001)
+
+    # prints the summary messages:
+    print("the best grid:\n", model.population[0].grid_arr)
+    print("score grid: ", model.population[0].score)
+    print("model.max_score ", model.max_score)
+
+    print("max all ", (np.array(max_arr)).max())
+    print("max end ", (np.array(max_arr))[-1])
+
+    if is_solution:
+        print("find a solution!!")
+    else:
+        print("did not find a solution")
+
+    # draws the plot
+    plt.plot(np.array(max_arr))
+    plt.plot(np.array(avg_arr))
+    plt.plot(np.array([model.max_score]))
+    title = "file_name " + file_name + " algorithm_name " + algorithm_name + " \n i " + str(j) + " max_score " + str(
+        model.max_score) + " current max " + str(current_max)
+
+    plt.title(title, fontweight="bold")
+
+    plt.show()
+
+
+if __name__ == '__main__':
+    run_model()
